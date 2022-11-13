@@ -1,0 +1,58 @@
+CREATE OR REPLACE procedure invprocedure(
+
+    )
+    language plpgsql as $$
+DECLARE 
+    cur SCROLL CURSOR FOR select * from lambda_iteminventorytemp;
+    r1 RECORD;
+    itm integer;
+    stockinventory RECORD;
+    itminventory integer;
+    stockiteminventory_count integer;
+    stockiteminventory_new_count integer;
+begin
+    OPEN cur ;      
+    LOOP
+	   r1 := NULL;
+	   itm :=NULL;
+	   stockinventory := NULL;
+	   itminventory :=NULL;
+	   stockiteminventory_count :=0;
+           stockiteminventory_new_count :=0;
+       FETCH from  cur INTO r1;
+       EXIT WHEN NOT FOUND;
+	select item_id from item where sku=r1.sku limit 1 into itm ;
+	if itm > 0
+		then
+		   select count(*) into stockiteminventory_count from stockiteminventory ;
+		   select * into stockinventory from stockiteminventory where item_id=itm limit 1;
+		   if stockinventory > 0
+			then
+			   select iteminventory_id into itminventory from iteminventory where stockiteminventory_id=stockinventory.stockiteminventory_id and store_id=r1.store_id limit 1;
+			   if itminventory > 0
+			  	then
+				    update into iteminventory set actual_stock = r1.actual_stock, safety_stock = r1.virtual_stock, updated_date= CURRENT_DATE where stockiteminventory_id=stockinventory.stockiteminventory_id and store_id=r1.store_id limit 1;
+			   else
+				insert into iteminventory (actual_stock, virtual_stock, stockinventory_id, created_date, updated_date)
+					values(r1.actual_stock, r1.virtual_stock , CURRENT_DATE, CURRENT_DATE);
+			   ENDIF;
+    		  else
+			insert into stockiteminventory (item_id, created_date, updated_date)
+				values(itm, created_date, updated_date);
+			select count(*) into stockiteminventory_new_count from stockiteminventory;
+			if stockiteminventory_new_count > stockiteminventory_count;
+			    insert into iteminventory (actual_stock, virtual_stock, stockinventory_id, store_id, created_date, updated_date)
+					values(r1.actual_stock, r1.virtual_stock ,r1.store_id, CURRENT_DATE, CURRENT_DATE);
+			else
+			    continue
+			ENDIF;
+		ENDIF;
+				
+       raise notice 'record id %', r1.id;
+       END LOOP;
+    CLOSE cur;
+END; 
+$$
+
+call invprocedure()
+
