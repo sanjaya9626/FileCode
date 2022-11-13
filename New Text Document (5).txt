@@ -1,0 +1,378 @@
+class ImportTemplateAPIView(generics.GenericAPIView):
+    """ Import Template API view """
+
+    serializer_class = ImportTemplateSerializer
+    queryset = ImportTemplate.objects.all()
+    lookup_field = "importtemplate_id"
+
+    def post(self, request, *args, **kwargs):
+        """ Import Template API view : POST method """
+        
+        data = request.data
+        body_data = []
+        errors = []
+        mapdata = []
+        xls_data_info = []
+        xls_data_info_obj = {}
+        xls_column_header_obj = {}
+        importtemplate_name = data.get("importtemplate_name")
+        import_modulename = data.get("import_modulename")
+        taxonomy_name = ""
+        thread_argument = {}
+        if importtemplate_name is None or importtemplate_name =='null':
+            return Response(
+                {
+                    "message": "Select or add a valid Template.",
+                    "api_status": 0,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        """
+        check for unique template name
+        """
+        if (
+            "importtemplate_id" in data
+            and int(data["importtemplate_id"]) > 0
+        ):
+            importtemplate_obj_exists = ImportTemplate.objects.filter(
+                Q(importtemplate_name__iexact = importtemplate_name),
+                ~Q(importtemplate_id = data["importtemplate_id"]),
+            ).exists()
+        else:
+            importtemplate_obj_exists = ImportTemplate.objects.filter(
+                importtemplate_name__iexact = importtemplate_name,
+            ).exists()
+
+        if importtemplate_obj_exists:
+            return Response(
+                {
+                    "message": "Template Name Already Exists.",
+                    "api_status": 0,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            try:
+                if importtemplate_name and import_modulename == "products":
+                    primary_taxonomy = data.get("primary_taxonomy", "")
+                    if (
+                        primary_taxonomy
+                        and primary_taxonomy != ""
+                        and int(primary_taxonomy) > 0
+                    ):
+                        template_taxonomy = (
+                            MerchandiseHierarchyGroup.objects.filter(
+                                merchandisehierarchygroup_id=primary_taxonomy
+                            ).first()
+                        )
+                        if not template_taxonomy:
+                            return Response(
+                                {
+                                    "message": "This primary taxonomy does not exists.",
+                                    "api_status": 0,
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+                        else:
+                            taxonomy_name = (
+                                template_taxonomy.merchandisehierarchygroupname
+                            )
+
+                    else:
+                        return Response(
+                            {
+                                "message": "Primary taxonomy is required.",
+                                "api_status": 0,
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                allowed_mime = [
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel",
+                    "text/csv",
+                ]
+                try:
+                    content_type = mimetypes.guess_type(
+                        data.get("fileUrl").name
+                    )[0]
+
+                except Exception :
+                    content_type = None
+
+                if not data.get("fileUrl"):
+                    return Response(
+                        {
+                            "message": "Select a valid file ( csv, xls, xlsx ).",
+                            "api_status": 0,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if content_type and content_type in allowed_mime:
+                    delimeter = data.get("delimeter")
+                    filepath = str(data.get("fileUrl"))
+                    filepathArray = str(filepath).split(".")
+                    typeArray = ["csv", "xls", "xlsx"]
+                    file_name = filepath.split("/")[-1]
+                    try:
+                        extn = file_name.split(".")[-1]
+
+                        if not len(filepathArray):
+                            errors.append("Invalid Path")
+                        else:
+                            if extn not in typeArray:
+                                errors.append(
+                                    extn
+                                    + " Invalid file type. File must be of type csv, xls, xlsx."
+                                )
+                    except Exception:
+                        pass
+
+                    if len(errors) > 0:
+                        error_txt = ". ".join([str(i) for i in errors])
+                        return Response(
+                            {"message": error_txt, "api_status": 0},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    import_data = ImportTemplateSerializer(data=data)
+                    if (
+                        "importtemplate_id" in data
+                        and int(data["importtemplate_id"]) > 0
+                    ):
+                        try:
+                            importobj = ImportTemplate.objects.get(
+                                importtemplate_id=int(
+                                    data["importtemplate_id"]
+                                )
+                            )
+                        except ImportTemplate.DoesNotExist:
+                            importobj = None
+                        if importobj:
+                            import_data = ImportTemplateSerializer(
+                                importobj, data=data
+                            )
+
+                    if import_data.is_valid():
+                        file_encoading = data["file_encoading"]
+                        import_save = import_data.save()
+                        """   notitification event id reset """
+                        if ( NotificationLog.objects.filter(
+                                event_id=data["importtemplate_id"]
+                            )
+                        ):
+                            NotificationLog.objects.filter(
+                                event_id=data["importtemplate_id"]
+                            ).update(event_id=0)
+
+                        if import_save.importtemplate_id:
+                            body_data = import_data.data
+                            body_data["isimported"] = False
+                            body_data["validation_is_in_progress"] = 0
+                            body_data["importtemplate_filename"] = str(
+                                import_save.fileUrl
+                            ).split("/")[-1]
+                            uploaded_file_url = "/" + str(import_save.fileUrl)
+                            rec_count = 0
+                            body_data["file_type"] = extn
+                            thread_argument = {
+                                "extn": extn,
+                                "uploaded_file_url": uploaded_file_url,
+                                "file_encoading": file_encoading,
+                                "delimeter": delimeter,
+                                "importtemplate_id": import_save.importtemplate_id,
+                            }
+                            body_data["excess_row_in_progress"] = 0
+                            if extn == "csv":
+                                try:
+                                    csvReader = csv.reader(
+                                        codecs.open(
+                                            settings.MEDIA_ROOT
+                                            + uploaded_file_url,
+                                            "r",
+                                            encoding=file_encoading,
+                                            errors="ignore",
+                                        ),
+                                        delimiter=delimeter,
+                                    )
+                                    if csvReader == "":
+                                        errors.append(
+                                            "Please Import Utf-8 File."
+                                        )
+                                    else:
+                                        reader = list(csvReader)
+                                    for row in reader:
+                                        if rec_count == 0:
+                                            xls_column_header_obj = row
+                                            xls_column_header_row_obj = dict()
+                                            for key in xls_column_header_obj:
+                                                xls_column_header_row_obj[key] = key
+                                            xls_data_info.append(xls_column_header_row_obj)
+
+                                        elif rec_count <=import_batch_limit:
+                                            xls_data_info_obj = dict(
+                                                zip(xls_column_header_obj, row)
+                                            )
+                                            xls_data_info.append(
+                                                xls_data_info_obj
+                                            )
+                                        else:
+                                            thread_argument.update({"header_row":xls_column_header_row_obj})
+                                            body_data["excess_row_in_progress"] = 1
+                                            break
+                                        rec_count = rec_count + 1
+                                except Exception as e:
+                                    errors.append(repr(e))
+                            elif extn == "xls" or extn == "xlsx":
+                                try:
+                                    wb = open_workbook(
+                                        settings.MEDIA_ROOT + uploaded_file_url
+                                    )
+                                    for s in wb.sheets():
+                                        values = []
+                                        for row in range(s.nrows):
+                                            if rec_count <=import_batch_limit:
+                                                col_value = []
+                                                for col in range(s.ncols):
+                                                    (
+                                                        value,
+                                                        value_type,
+                                                    ) = data_type_check(
+                                                        s.cell(row, col).value
+                                                    )
+
+                                                    col_value.append(str(value))
+                                                values.append(col_value)
+                                                row = values[0]
+                                                xls_data_info_obj = dict(
+                                                    zip(row, col_value)
+                                                )
+                                                xls_data_info.append(
+                                                    xls_data_info_obj
+                                                )
+                                            else:
+                                                thread_argument.update({"header_row":values[0]})
+                                                body_data["excess_row_in_progress"] = 1
+                                                break
+                                            
+                                            rec_count += 1
+                                except Exception as e:
+                                    errors.append(repr(e))
+
+                            if len(xls_data_info) == 1:
+                                errors.append("Uploaded file is empty.")
+                            else:
+                                for coldata in xls_data_info[0]:
+                                    if coldata.lower() != "item name":
+                                        try:
+                                            mappobj = ImportTemplateMapper.objects.filter(
+                                                importtemplate_id=import_save.importtemplate_id,
+                                                templatefield_name=coldata.strip(),
+                                            ).first()
+                                        except ImportTemplateMapper.DoesNotExist:
+                                            mappobj = None
+
+                                        if mappobj:
+                                            tempmapperserializer = (
+                                                ImportTemplateMapperSerializer(
+                                                    mappobj
+                                                )
+                                            )
+                                            mapdata.append(
+                                                tempmapperserializer.data
+                                            )
+                                        else:
+                                            mapjsondata = {
+                                                "importtemplate": import_save.importtemplate_id,
+                                                "templatefield_name": coldata,
+                                                "databasefield_name": "",
+                                                "field_description": "",
+                                                "is_required": False,
+                                                "is_set": False,
+                                            }
+                                            tempmapperserializer = (
+                                                ImportTemplateMapperSerializer(
+                                                    data=mapjsondata
+                                                )
+                                            )
+                                            if tempmapperserializer.is_valid():
+                                                tempmapperserializer.save()
+                                                mapdata.append(
+                                                    tempmapperserializer.data
+                                                )
+                                            else:
+                                                transaction.set_rollback(True)
+                                                return Response(
+                                                    {
+                                                        "message": tempmapperserializer.errors,
+                                                        "api_status": 0,
+                                                    },
+                                                    status=status.HTTP_400_BAD_REQUEST,
+                                                )
+                                                
+                            body_data["mapdata"] = mapdata
+
+                    else:
+                        transaction.set_rollback(True)
+                        err = self.errorformat(
+                            errormsg=repr(import_data.errors)
+                        )
+                        return Response(
+                            {"message": err, "api_status": 0},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                else:
+                    return Response(
+                        {
+                            "message": "Invalid File type. Select a valid file ( csv, xls, xlsx ).",
+                            "api_status": 0,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if len(errors) > 0:
+                    error_txt_final = ". ".join([str(i) for i in errors])
+                    return Response(
+                        {"message": error_txt_final, "api_status": 0},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                body_data["import_data"] = xls_data_info
+                body_data["total_rows"] = len(xls_data_info)
+                body_data["valid_count"] = len(xls_data_info)
+                body_data["error_count"] = 0
+                body_data["warning_count"] = 0
+                body_data["importsuccess_rows"] = 0
+                body_data["id"] = import_save.importtemplate_id
+                body_data["taxonomy_name"] = taxonomy_name  
+                resp_data = ElasticSearchInstance.get_record_by_id(index=EsIndexTemplate,id=import_save.importtemplate_id)  
+                if resp_data["found"] and "last_validated_rows" in resp_data["data"]:
+                    body_data["last_validated_rows"] = resp_data["data"]["last_validated_rows"]
+                else:
+                    body_data["last_validated_rows"] = []      
+                if resp_data["found"] and "import_exception" in resp_data["data"]:
+                    body_data["last_import_exception"] = resp_data["data"]["import_exception"]
+                else:
+                    body_data["last_import_exception"] = []   
+                es.index(
+                    index=EsIndexTemplate,
+                    doc_type=doc_type,
+                    id=import_save.importtemplate_id,
+                    body=body_data,
+                )
+                body_data["fileUrl"] = ""
+                if "header_row" in thread_argument and thread_argument["header_row"]:
+                    self.get_rows_from_file(self,**thread_argument)
+
+            except Exception as e:
+                transaction.set_rollback(True)
+                err = self.errorformat(errormsg=repr(e))
+                return Response(
+                    {"message": err, "api_status": 0},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        return Response(body_data, status=status.HTTP_201_CREATED)
