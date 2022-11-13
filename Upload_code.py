@@ -1,110 +1,27 @@
 class ImportTemplateAPIView(generics.GenericAPIView):
     """ Import Template API view """
-
-    serializer_class = ImportTemplateSerializer
-    queryset = ImportTemplate.objects.all()
     lookup_field = "importtemplate_id"
 
     def post(self, request, *args, **kwargs):
         """ Import Template API view : POST method """
         
         data = request.data
-        body_data = []
-        errors = []
-        mapdata = []
-        xls_data_info = []
-        xls_data_info_obj = {}
-        xls_column_header_obj = {}
-        importtemplate_name = data.get("importtemplate_name")
-        import_modulename = data.get("import_modulename")
-        taxonomy_name = ""
-        thread_argument = {}
-        if importtemplate_name is None or importtemplate_name =='null':
-            return Response(
-                {
-                    "message": "Select or add a valid Template.",
-                    "api_status": 0,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        """
-        check for unique template name
-        """
-        if (
-            "importtemplate_id" in data
-            and int(data["importtemplate_id"]) > 0
-        ):
-            importtemplate_obj_exists = ImportTemplate.objects.filter(
-                Q(importtemplate_name__iexact = importtemplate_name),
-                ~Q(importtemplate_id = data["importtemplate_id"]),
-            ).exists()
-        else:
-            importtemplate_obj_exists = ImportTemplate.objects.filter(
-                importtemplate_name__iexact = importtemplate_name,
-            ).exists()
-
-        if importtemplate_obj_exists:
-            return Response(
-                {
-                    "message": "Template Name Already Exists.",
-                    "api_status": 0,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        with transaction.atomic():
-            try:
-                if importtemplate_name and import_modulename == "products":
-                    primary_taxonomy = data.get("primary_taxonomy", "")
-                    if (
-                        primary_taxonomy
-                        and primary_taxonomy != ""
-                        and int(primary_taxonomy) > 0
-                    ):
-                        template_taxonomy = (
-                            MerchandiseHierarchyGroup.objects.filter(
-                                merchandisehierarchygroup_id=primary_taxonomy
-                            ).first()
-                        )
-                        if not template_taxonomy:
-                            return Response(
-                                {
-                                    "message": "This primary taxonomy does not exists.",
-                                    "api_status": 0,
-                                },
-                                status=status.HTTP_400_BAD_REQUEST,
-                            )
-                        else:
-                            taxonomy_name = (
-                                template_taxonomy.merchandisehierarchygroupname
-                            )
-
-                    else:
-                        return Response(
-                            {
-                                "message": "Primary taxonomy is required.",
-                                "api_status": 0,
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-
-                allowed_mime = [
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "application/vnd.ms-excel",
-                    "text/csv",
+        try:
+            allowed_mime = [
+                    "text/plain"
                 ]
-                try:
-                    content_type = mimetypes.guess_type(
+            try:
+                content_type = mimetypes.guess_type(
                         data.get("fileUrl").name
                     )[0]
 
-                except Exception :
-                    content_type = None
+            except Exception :
+                   content_type = None
 
                 if not data.get("fileUrl"):
                     return Response(
                         {
-                            "message": "Select a valid file ( csv, xls, xlsx ).",
+                            "message": "Select a valid file ( "text/plain" ).",
                             "api_status": 0,
                         },
                         status=status.HTTP_400_BAD_REQUEST,
@@ -137,61 +54,14 @@ class ImportTemplateAPIView(generics.GenericAPIView):
                             status=status.HTTP_400_BAD_REQUEST,
                         )
 
-                    import_data = ImportTemplateSerializer(data=data)
-                    if (
-                        "importtemplate_id" in data
-                        and int(data["importtemplate_id"]) > 0
-                    ):
-                        try:
-                            importobj = ImportTemplate.objects.get(
-                                importtemplate_id=int(
-                                    data["importtemplate_id"]
-                                )
-                            )
-                        except ImportTemplate.DoesNotExist:
-                            importobj = None
-                        if importobj:
-                            import_data = ImportTemplateSerializer(
-                                importobj, data=data
-                            )
-
-                    if import_data.is_valid():
-                        file_encoading = data["file_encoading"]
-                        import_save = import_data.save()
-                        """   notitification event id reset """
-                        if ( NotificationLog.objects.filter(
-                                event_id=data["importtemplate_id"]
-                            )
-                        ):
-                            NotificationLog.objects.filter(
-                                event_id=data["importtemplate_id"]
-                            ).update(event_id=0)
-
-                        if import_save.importtemplate_id:
-                            body_data = import_data.data
-                            body_data["isimported"] = False
-                            body_data["validation_is_in_progress"] = 0
-                            body_data["importtemplate_filename"] = str(
-                                import_save.fileUrl
-                            ).split("/")[-1]
-                            uploaded_file_url = "/" + str(import_save.fileUrl)
-                            rec_count = 0
-                            body_data["file_type"] = extn
-                            thread_argument = {
-                                "extn": extn,
-                                "uploaded_file_url": uploaded_file_url,
-                                "file_encoading": file_encoading,
-                                "delimeter": delimeter,
-                                "importtemplate_id": import_save.importtemplate_id,
-                            }
-                            body_data["excess_row_in_progress"] = 0
-                            if extn == "csv":
-                                try:
-                                    csvReader = csv.reader(
-                                        codecs.open(
-                                            settings.MEDIA_ROOT
-                                            + uploaded_file_url,
-                                            "r",
+                    body_data["excess_row_in_progress"] = 0
+                    if extn == "csv":
+                    try:
+                       csvReader = csv.reader(
+                       codecs.open(
+                                settings.MEDIA_ROOT
+                                + uploaded_file_url,
+                                 "r",
                                             encoding=file_encoading,
                                             errors="ignore",
                                         ),
