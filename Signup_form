@@ -1,0 +1,60 @@
+from django.contrib.auth.forms import UserCreationForm
+from .forms import Signupform
+from django.contrib import messages
+def sign_up(request):
+    if request.method == "POST":
+        form = Signupform(request.POST)
+        if form.is_valid():
+            messages.success(request,'User registered successfully')
+            form.save()
+    else:
+        form = Signupform()
+    return render(request,'signup.html',{'form' : form})
+    
+    
+from django import forms
+from django.contrib.auth.models import User
+from django.contrib.auth.forms import UserCreationForm
+
+class Signupform(UserCreationForm):
+    email = forms.EmailField(required=True)
+    mobile = forms.IntegerField(required=True)
+
+    class meta:
+        model = User
+        fields = ('username', 'name', 'email', 'mobile')
+        labels = {"email": "Email"}
+        
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>User Registration</title>
+        <style>
+            .success{color:red;}
+        </style>
+    </head>
+    <body>
+
+        <form action="" method="post" novalidate>
+            {% csrf_token %}
+            {% for fm in form %}
+                {{fm.label_tag}} {{fm}} {{fm.errors|striptags}}  <br><br>
+            {% endfor %}
+            <input type="submit" value="Submit">
+        </form>
+        {% if messages %}
+            {% for message in messages %}
+                <small {% if message.tags %} class="{{message.tags}}" {% endif %}>{{message}}</small>
+            {% endfor %}
+        {% endif %}
+<!--    <a href="{% url 'login' %}">Login</a>-->
+    </body>
+    </html>
+
+path('sign_up/',views.sign_up,name='login'),
+
+
+
+
