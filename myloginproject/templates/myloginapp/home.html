@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+{% extends 'myloginapp/base.html' %}
+{% block body_block %}
+{% load static %}
+<div class="container">
+    <div class="jumbotron jumbotron-fluid">
+  <div class="container">
+    <h1 class="display-4">Welcome to satya exams</h1>
+    <p class="lead">The best exam experience you will get..</p>
+  </div>
+</div>
+</div>
+<div class="container-fluid">
+<h3>The rules of Exams are as follows</h3><hr>
+<ul>
+    <li>every exam will be of 90 minutes.</li>
+    <li>Each correct answer will reward you 1 mark and wrong answer will cost you 0.5 marks.</li>
+</ul>
+    </div>
+<link rel="stylesheet" href="{% static 'css/decor.css' %}">
+{% endblock %}
