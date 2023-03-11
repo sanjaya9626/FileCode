@@ -1,0 +1,184 @@
+urls.py:
+==========
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('signup/', views.customer_signup, name='sign_up'),
+    path('signin/', views.login_view, name='login'),
+    path('home/', views.home, name ='home'),
+]
+
+views.py:
+==========
+from django.shortcuts import render
+from .forms import UserForm
+from django.shortcuts import render, redirect
+from django.contrib import auth
+from django.views.decorators.csrf import csrf_exempt
+
+
+# Create your views here.
+
+def customer_signup(request):
+    if request.method == 'POST':
+        form = UserForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            return redirect("cust_login")
+    else:
+        form = UserForm()
+    return render(request, 'signup.html', {'form': form})
+
+
+def login_view(request):
+    if request.method == 'POST':
+        username = request.POST['username']
+        print(username)
+        password = request.POST['password']
+        print(password)
+        user = auth.authenticate(request, username=username, password=password)
+        print(user)
+        if user is not None:
+            auth.login(request, user)
+            # return redirect(request.GET.get('next', "home"))
+            return redirect("home")
+        else:
+            error_message = 'Invalid username or password'
+            return render(request, 'signin.html', {'error_message': error_message})
+    else:
+        return render(request, 'signin.html')
+
+
+def home(request):
+    return render(request, 'home.html')
+    
+settings.py:
+==============
+AUTHENTICATION_BACKENDS = ['AuthApp.backends.CustomAuth',
+                           'django.contrib.auth.backends.ModelBackend']
+AUTH_USER_MODEL = 'AuthApp.PentestUser'
+
+models.py:
+==========
+from django.db import models
+from django.db import models
+from django.contrib.auth.models import (
+    BaseUserManager, AbstractBaseUser, AbstractUser
+)
+
+
+class PentestUserManager(BaseUserManager):
+
+    def create_user(self, email, name, telephone, username, **extra_fields):
+
+        if not name:
+            raise ValueError('Users must have a Name')
+        if not email:
+            raise ValueError('Users must have an email address')
+        if not telephone:
+            raise ValueError('Users must have a telephone number')
+        if not username:
+            raise ValueError('Users must have a Username')
+
+        email = self.normalize_email(email)
+        user = self.model(name=name, email=email, telephone=telephone, username=username)
+        # user.set_password(password)
+        # user.set_unusable_password()
+        user.save()
+        return user
+
+    def create_superuser(self, email, password, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('is_active', True)
+
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True.')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+        return self.create_user(email, password, **extra_fields)
+
+
+class PentestUser(AbstractBaseUser):
+    name = models.CharField(verbose_name='Name', max_length=50)
+    email = models.EmailField(verbose_name='Email', unique=True)
+    telephone = models.CharField(verbose_name='Phone', max_length=20)
+    username = models.CharField(verbose_name='Username', max_length=50)
+
+    USERNAME_FIELD = 'username'
+    REQUIRED_FIELDS = ['name', 'email', telephone, username]
+
+    object = PentestUserManager()
+
+    def __str__(self):
+        return self.email
+
+    class Meta:
+        db_table = 'PentestUser'
+
+backends.py:
+============
+from django.contrib.auth.backends import ModelBackend
+from .models import PentestUser
+from logging import Logger
+
+# from django.contrib.auth.models import check_password
+
+class CustomAuth(ModelBackend):
+    def authenticate(self, request, username=None, password=None, **kwargs):
+        try:
+            user = PentestUser.objects.get(username=username)
+        except PentestUser.DoesNotExist:
+            return None
+        if user.check_password(password):
+            return user
+        else:
+            return None
+
+signin.py:
+==========
+{% block content %}
+<h2>Login</h2>
+<form method="POST">
+  {% csrf_token %}
+  <label for="username">Username:</label>
+  <input type="text" name="username" required><br><br>
+  <label for="password">Password:</label>
+  <input type="password" name="password" required><br><br>
+  <input type="submit" value="Login">
+</form>
+{% endblock %}
+
+forms.py:
+=========
+from django import forms
+from .models import PentestUser
+
+from django.contrib.auth.forms import UserCreationForm, UserChangeForm
+
+
+class UserForm(UserCreationForm):
+    password1 = forms.CharField(label='Password', widget=forms.PasswordInput)
+    password2 = forms.CharField(label='Password confirmation', widget=forms.PasswordInput)
+
+    class Meta:
+        model = PentestUser
+        fields = "__all__"
+        
+ signup.py:
+ ==========
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+    <form method="post">
+        {{ form.as_p }}
+        <input class="btn btn-primary btn" type="submit" value="Submit"/>
+      {% csrf_token %}
+<!--        <input type="submit" class="btn btn-primary" name="" value="submit">-->
+
+    </form>
+</body>
+</html>
