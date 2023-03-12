@@ -4,34 +4,41 @@ from django.shortcuts import redirect, render
 from myloginapp.forms import MyuserForm
 from myloginapp.models import MyUser
 from django.contrib.auth.hashers import make_password, check_password
+import inspect
+from functools import wraps
 
 # Create your views here.
 
 
-# def my_loginrequired(func):
-#     import pdb
-#     pdb.set_trace()
+def my_loginrequired(func):
+    # import pdb
+    # pdb.set_trace()
 
-#     def inner(request):
-#         print("inside my_loginrequired: ")
-#         credentials = request.session.get("credentials")
-#         print("type", type(credentials))
-#         username = credentials.get("username")
-#         password = credentials.get("password")
-#         get_user = MyUser.objects.filter(username=username).first()
-#         print("get_user: ", get_user)
-#         if check_password(password, get_user.password):
-#             credentials = {}
-#             credentials["username"] = username
-#             credentials["password"] = password
-#             request.session["credentials"] = credentials
-#             func()
-#             return inner
-#         return render(request, "myloginapp/login.html")
-#     return inner
+    @wraps(func)
+    def inner(request, *args, **kwargs):
+        print("inside my_loginrequired: ")
+        print("the arguments are: ", func.__name__)
+        # arguments = inspect.getfullargspec(func)
+
+        print("request: ", request)
+        if request.session.get("credentials"):
+            credentials = request.session.get("credentials")
+            print("type", type(credentials))
+            username = credentials.get("username")
+            password = credentials.get("password")
+            get_user = MyUser.objects.filter(username=username).first()
+            print("get_user: ", get_user)
+            if check_password(password, get_user.password):
+                credentials = {}
+                credentials["username"] = username
+                credentials["password"] = password
+                request.session["credentials"] = credentials
+                return func(request, *args, **kwargs)
+        return render(request, "myloginapp/login.html")
+    return inner
 
 
-# @my_loginrequired
+@my_loginrequired
 def home_info(request):
     credentials = request.session.get("credentials")
     print("type", type(credentials))
@@ -89,12 +96,6 @@ def login_view(request):
     return render(request, 'myloginapp/login.html')
 
 
-# user = auth.authenticate(request, username=username, password=password)
-#       print(user)
-#        if user is not None:
-#             auth.login(request, user)
-#             # return redirect(request.GET.get('next', "home"))
-#             return redirect("home")
-#         else:
-#             error_message = 'Invalid username or password'
-#             return render(request, 'signin.html', {'error_message': error_message})
+@my_loginrequired
+def logoutview(request):
+    pass
